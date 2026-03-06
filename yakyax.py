@@ -1,5 +1,5 @@
 # ============================================================
-# jx.py  —  JX: jQuery for JAX  (tight build)
+# yakyax.py  —  YakTensor: YAKYAX for JAX  (tight build)
 # Author : J. Roberto Jiménez · tijuanapaint@gmail.com
 # ============================================================
 """
@@ -7,8 +7,8 @@ Design principles
 ─────────────────
 • The graph IS the function — node_fn is a composed closure,
   never a list that gets reduced at runtime.
-• Every method returns a new JX — fully immutable chain.
-• JX objects are first-class JAX callables (__call__ = node_fn).
+• Every method returns a new YakTensor — fully immutable chain.
+• YakTensor objects are first-class JAX callables (__call__ = node_fn).
 • Execution is explicit: .value() | .jit() | .grad() | .scan()
 """
 
@@ -25,7 +25,7 @@ import time
 # Core
 # ─────────────────────────────────────────────────────────────
 
-class JX:
+class YakTensor:
     """
     A single node in a lazy computation graph.
 
@@ -52,7 +52,7 @@ class JX:
 
     # ── Internal ─────────────────────────────────────────────
 
-    def _chain(self, fn: Callable, label: str) -> "JX":
+    def _chain(self, fn: Callable, label: str) -> "YakTensor":
         """Compose fn onto the existing pipeline — O(1), no list."""
         prev = self.node_fn
         if getattr(self, "_is_vmapped", False):
@@ -65,12 +65,12 @@ class JX:
             new_fn = lambda x: fn(prev(x))
 
         
-        new_jx = JX(self.data, new_fn, f"{self.name}→{label}")
+        new_tensor = YakTensor(self.data, new_fn, f"{self.name}→{label}")
         if getattr(self, "_is_vmapped", False):
-            new_jx._set_vmap(self._in_axes, self._out_axes)
+            new_tensor._set_vmap(self._in_axes, self._out_axes)
         if getattr(self, "_is_pmapped", False):
-            new_jx._set_pmap()
-        return new_jx
+            new_tensor._set_pmap()
+        return new_tensor
 
     def _label(self, fn: Callable, fallback: str) -> str:
         return getattr(fn, "__name__", fallback)
@@ -85,7 +85,7 @@ class JX:
         self._is_pmapped = True
         return self
 
-    # ── Make JX a first-class JAX function ───────────────────
+    # ── Make YakTensor a first-class JAX function ───────────────────
 
     def __call__(self, x: Any) -> Any:
         """Apply the pipeline to an arbitrary input (no .data needed)."""
@@ -95,7 +95,7 @@ class JX:
     # Fluent API
     # ─────────────────────────────────────────────────────────
 
-    def pipe(self, fn: Callable) -> "JX":
+    def pipe(self, fn: Callable) -> "YakTensor":
         """Inject any function into the chain."""
         return self._chain(fn, self._label(fn, "pipe"))
 
@@ -104,39 +104,39 @@ class JX:
     def value(self) -> Any:
         """Materialize the graph — eager execution."""
         if self.data is None:
-            raise ValueError("No data attached. Use jx(data) or call the pipeline directly.")
+            raise ValueError("No data attached. Use yakyax(data) or call the pipeline directly.")
         return self.node_fn(self.data)
 
     def value_of(self) -> Any:
         """Alias for .value() to match README/Notebook."""
         return self.value()
 
-    def fuse(self) -> "JX":
+    def fuse(self) -> "YakTensor":
         """
         JIT-compile the accumulated pipeline into a single XLA op.
-        Returns a new JX with the compiled function baked in.
+        Returns a new YakTensor with the compiled function baked in.
         """
         compiled = jit(self.node_fn)
-        return JX(self.data, compiled, f"jit({self.name})")
+        return YakTensor(self.data, compiled, f"jit({self.name})")
 
-    def map(self, in_axes: int = 0, out_axes: int = 0) -> "JX":
+    def map(self, in_axes: int = 0, out_axes: int = 0) -> "YakTensor":
         """
         Vectorize the pipeline over a batch dimension.
         Subsequent operations in the chain will be vmapped.
         """
-        return JX(
+        return YakTensor(
             self.data,
             self.node_fn,
             f"vmap({self.name})",
         )._set_vmap(in_axes, out_axes)
 
-    def vmap(self, in_axes: int = 0, out_axes: int = 0) -> "JX":
+    def vmap(self, in_axes: int = 0, out_axes: int = 0) -> "YakTensor":
         """Alias for .map() to match README/Notebook."""
         return self.map(in_axes=in_axes, out_axes=out_axes)
 
-    def pmap(self) -> "JX":
+    def pmap(self) -> "YakTensor":
         """Split work across multiple devices/GPUs."""
-        return JX(
+        return YakTensor(
             self.data,
             self.node_fn,
             f"pmap({self.name})",
@@ -149,7 +149,7 @@ class JX:
         *,
         length: Optional[int] = None,
         reverse: bool = False,
-    ) -> "JX":
+    ) -> "YakTensor":
         """
         Apply jax.lax.scan over the pipeline's output (treated as xs).
 
@@ -157,13 +157,13 @@ class JX:
         init  : initial carry
         length: optional explicit length
 
-        Returns a JX whose value is (final_carry, stacked_ys).
+        Returns a YakTensor whose value is (final_carry, stacked_ys).
 
         Example — running sum:
-            jx(xs).scan(lambda c, x: (c + x, c + x), 0.0).value()
+            yakyax(xs).scan(lambda c, x: (c + x, c + x), 0.0).value()
 
         Example — Euler ODE step:
-            jx(ts).scan(euler_step, y0).value()
+            yakyax(ts).scan(euler_step, y0).value()
         """
         pipeline = self.node_fn
 
@@ -171,7 +171,7 @@ class JX:
             xs = pipeline(x)
             return lax.scan(fn, init, xs, length=length, reverse=reverse)
 
-        return JX(self.data, _scan_node, f"scan({self.name})")
+        return YakTensor(self.data, _scan_node, f"scan({self.name})")
 
     # ── Autograd ─────────────────────────────────────────────
 
@@ -179,121 +179,121 @@ class JX:
         self,
         argnums: Union[int, Tuple] = 0,
         has_aux: bool = False,
-    ) -> "JX":
+    ) -> "YakTensor":
         """
         Differentiate the pipeline.
-        Returns a JX that computes ∇(pipeline) at .data.
+        Returns a YakTensor that computes ∇(pipeline) at .data.
 
         Note: grad replaces the pipeline — it differentiates the
         *whole* chain up to this point.
         """
         grad_fn = grad(self.node_fn, argnums=argnums, has_aux=has_aux)
-        return JX(self.data, grad_fn, f"∇({self.name})")
+        return YakTensor(self.data, grad_fn, f"∇({self.name})")
 
-    def value_and_grad(self, argnums: int = 0) -> "JX":
+    def value_and_grad(self, argnums: int = 0) -> "YakTensor":
         """
-        Returns a JX whose value is (output, gradient).
+        Returns a YakTensor whose value is (output, gradient).
         Single forward+backward pass — no double computation.
         """
         vg = jax.value_and_grad(self.node_fn, argnums=argnums)
-        return JX(self.data, vg, f"val+∇({self.name})")
+        return YakTensor(self.data, vg, f"val+∇({self.name})")
 
-    def hessian(self) -> "JX":
+    def hessian(self) -> "YakTensor":
         fn = self.node_fn
-        return JX(self.data, jax.hessian(fn), f"H({self.name})")
+        return YakTensor(self.data, jax.hessian(fn), f"H({self.name})")
 
-    def jacrev(self) -> "JX":
+    def jacrev(self) -> "YakTensor":
         fn = self.node_fn
-        return JX(self.data, jax.jacrev(fn), f"Jrev({self.name})")
+        return YakTensor(self.data, jax.jacrev(fn), f"Jrev({self.name})")
 
-    def jacfwd(self) -> "JX":
+    def jacfwd(self) -> "YakTensor":
         fn = self.node_fn
-        return JX(self.data, jax.jacfwd(fn), f"Jfwd({self.name})")
+        return YakTensor(self.data, jax.jacfwd(fn), f"Jfwd({self.name})")
 
     # ── Shape ─────────────────────────────────────────────────
 
-    def reshape(self, *shape)  -> "JX": return self._chain(lambda x: x.reshape(*shape),    "reshape")
-    def transpose(self, *axes) -> "JX": return self._chain(lambda x: x.transpose(*axes),   "T")
-    def squeeze(self, axis=None)->"JX": return self._chain(lambda x: x.squeeze(axis=axis), "squeeze")
-    def expand(self, axis: int) -> "JX": return self._chain(lambda x: jnp.expand_dims(x, axis), "expand")
-    def __getitem__(self, idx)  -> "JX": return self._chain(lambda x: x[idx],              "[]")
+    def reshape(self, *shape)  -> "YakTensor": return self._chain(lambda x: x.reshape(*shape),    "reshape")
+    def transpose(self, *axes) -> "YakTensor": return self._chain(lambda x: x.transpose(*axes),   "T")
+    def squeeze(self, axis=None)->"YakTensor": return self._chain(lambda x: x.squeeze(axis=axis), "squeeze")
+    def expand(self, axis: int) -> "YakTensor": return self._chain(lambda x: jnp.expand_dims(x, axis), "expand")
+    def __getitem__(self, idx)  -> "YakTensor": return self._chain(lambda x: x[idx],              "[]")
 
     # ── Activations ───────────────────────────────────────────
 
-    def relu(self)      -> "JX": return self._chain(jax.nn.relu,        "relu")
-    def sigmoid(self)   -> "JX": return self._chain(jax.nn.sigmoid,     "sigmoid")
-    def log_sigmoid(self)->"JX": return self._chain(jax.nn.log_sigmoid, "log_σ")
-    def tanh(self)      -> "JX": return self._chain(jnp.tanh,           "tanh")
-    def gelu(self)      -> "JX": return self._chain(jax.nn.gelu,        "gelu")
-    def softmax(self, axis=-1) -> "JX":
+    def relu(self)      -> "YakTensor": return self._chain(jax.nn.relu,        "relu")
+    def sigmoid(self)   -> "YakTensor": return self._chain(jax.nn.sigmoid,     "sigmoid")
+    def log_sigmoid(self)->"YakTensor": return self._chain(jax.nn.log_sigmoid, "log_σ")
+    def tanh(self)      -> "YakTensor": return self._chain(jnp.tanh,           "tanh")
+    def gelu(self)      -> "YakTensor": return self._chain(jax.nn.gelu,        "gelu")
+    def softmax(self, axis=-1) -> "YakTensor":
         return self._chain(lambda x: jax.nn.softmax(x, axis=axis), "softmax")
-    def log_softmax(self, axis=-1) -> "JX":
+    def log_softmax(self, axis=-1) -> "YakTensor":
         return self._chain(lambda x: jax.nn.log_softmax(x, axis=axis), "log_sm")
 
     # ── Elementwise math ──────────────────────────────────────
 
-    def abs(self)  -> "JX": return self._chain(jnp.abs,  "abs")
-    def sqrt(self) -> "JX": return self._chain(jnp.sqrt, "sqrt")
-    def exp(self)  -> "JX": return self._chain(jnp.exp,  "exp")
-    def log(self)  -> "JX": return self._chain(jnp.log,  "log")
-    def sin(self)  -> "JX": return self._chain(jnp.sin,  "sin")
-    def cos(self)  -> "JX": return self._chain(jnp.cos,  "cos")
+    def abs(self)  -> "YakTensor": return self._chain(jnp.abs,  "abs")
+    def sqrt(self) -> "YakTensor": return self._chain(jnp.sqrt, "sqrt")
+    def exp(self)  -> "YakTensor": return self._chain(jnp.exp,  "exp")
+    def log(self)  -> "YakTensor": return self._chain(jnp.log,  "log")
+    def sin(self)  -> "YakTensor": return self._chain(jnp.sin,  "sin")
+    def cos(self)  -> "YakTensor": return self._chain(jnp.cos,  "cos")
 
-    def normalize(self, eps: float = 1e-8) -> "JX":
+    def normalize(self, eps: float = 1e-8) -> "YakTensor":
         def _n(x): return (x - x.mean()) / jnp.sqrt(x.var() + eps)
         return self._chain(_n, "norm")
 
     # ── Reductions ────────────────────────────────────────────
 
-    def sum(self, axis=None, keepdims=False) -> "JX":
+    def sum(self, axis=None, keepdims=False) -> "YakTensor":
         return self._chain(lambda x: jnp.sum(x, axis=axis, keepdims=keepdims), "sum")
-    def mean(self, axis=None, keepdims=False) -> "JX":
+    def mean(self, axis=None, keepdims=False) -> "YakTensor":
         return self._chain(lambda x: jnp.mean(x, axis=axis, keepdims=keepdims), "mean")
-    def var(self, axis=None, keepdims=False) -> "JX":
+    def var(self, axis=None, keepdims=False) -> "YakTensor":
         return self._chain(lambda x: jnp.var(x, axis=axis, keepdims=keepdims), "var")
-    def std(self, axis=None, keepdims=False) -> "JX":
+    def std(self, axis=None, keepdims=False) -> "YakTensor":
         return self._chain(lambda x: jnp.std(x, axis=axis, keepdims=keepdims), "std")
-    def max(self, axis=None, keepdims=False) -> "JX":
+    def max(self, axis=None, keepdims=False) -> "YakTensor":
         return self._chain(lambda x: jnp.max(x, axis=axis, keepdims=keepdims), "max")
-    def min(self, axis=None, keepdims=False) -> "JX":
+    def min(self, axis=None, keepdims=False) -> "YakTensor":
         return self._chain(lambda x: jnp.min(x, axis=axis, keepdims=keepdims), "min")
 
     # ── Binary operators ──────────────────────────────────────
-    # _resolve: if other is a JX, evaluate its branch on the same x
+    # _resolve: if other is a YakTensor, evaluate its branch on the same x
     # (shared-input branching for residuals, attention, etc.)
 
     @staticmethod
     def _resolve(other: Any, x: Any) -> Any:
-        if isinstance(other, JX):
+        if isinstance(other, YakTensor):
             return other.node_fn(x)   # branch shares same x
         return other
 
-    def __add__(self, o)  -> "JX": return self._chain(lambda x: x + JX._resolve(o, x), "add")
-    def __radd__(self, o) -> "JX": return self._chain(lambda x: JX._resolve(o, x) + x, "radd")
-    def __sub__(self, o)  -> "JX": return self._chain(lambda x: x - JX._resolve(o, x), "sub")
-    def __rsub__(self, o) -> "JX": return self._chain(lambda x: JX._resolve(o, x) - x, "rsub")
-    def __mul__(self, o)  -> "JX": return self._chain(lambda x: x * JX._resolve(o, x), "mul")
-    def __rmul__(self, o) -> "JX": return self._chain(lambda x: JX._resolve(o, x) * x, "rmul")
-    def __truediv__(self, o)->"JX":return self._chain(lambda x: x / JX._resolve(o, x), "div")
-    def __pow__(self, o)  -> "JX": return self._chain(lambda x: x ** JX._resolve(o, x),"pow")
-    def __matmul__(self, o)->"JX": return self._chain(lambda x: x @ JX._resolve(o, x), "@")
-    def __neg__(self)     -> "JX": return self._chain(lambda x: -x,                     "neg")
+    def __add__(self, o)  -> "YakTensor": return self._chain(lambda x: x + YakTensor._resolve(o, x), "add")
+    def __radd__(self, o) -> "YakTensor": return self._chain(lambda x: YakTensor._resolve(o, x) + x, "radd")
+    def __sub__(self, o)  -> "YakTensor": return self._chain(lambda x: x - YakTensor._resolve(o, x), "sub")
+    def __rsub__(self, o) -> "YakTensor": return self._chain(lambda x: YakTensor._resolve(o, x) - x, "rsub")
+    def __mul__(self, o)  -> "YakTensor": return self._chain(lambda x: x * YakTensor._resolve(o, x), "mul")
+    def __rmul__(self, o) -> "YakTensor": return self._chain(lambda x: YakTensor._resolve(o, x) * x, "rmul")
+    def __truediv__(self, o)->"YakTensor":return self._chain(lambda x: x / YakTensor._resolve(o, x), "div")
+    def __pow__(self, o)  -> "YakTensor": return self._chain(lambda x: x ** YakTensor._resolve(o, x),"pow")
+    def __matmul__(self, o)->"YakTensor": return self._chain(lambda x: x @ YakTensor._resolve(o, x), "@")
+    def __neg__(self)     -> "YakTensor": return self._chain(lambda x: -x,                     "neg")
 
-    def dot(self, other)    -> "JX": return self @ other
-    def matmul(self, other) -> "JX": return self @ other
+    def dot(self, other)    -> "YakTensor": return self @ other
+    def matmul(self, other) -> "YakTensor": return self @ other
 
-    def einsum(self, subscripts: str, *operands) -> "JX":
+    def einsum(self, subscripts: str, *operands) -> "YakTensor":
         def _e(x):
-            ops = [o.node_fn(x) if isinstance(o, JX) else o for o in operands]
+            ops = [o.node_fn(x) if isinstance(o, YakTensor) else o for o in operands]
             return jnp.einsum(subscripts, x, *ops)
         return self._chain(_e, f"ein:{subscripts}")
 
     # ── Debug ─────────────────────────────────────────────────
 
-    def tap(self, msg: str = "") -> "JX":
+    def tap(self, msg: str = "") -> "YakTensor":
         """Passthrough that prints shape/dtype/mean — for mid-chain debugging."""
         def _t(x):
-            print(f"[jx·tap] {msg:20s}  shape={x.shape}  dtype={x.dtype}  μ={float(jnp.mean(x)):.4f}")
+            print(f"[yk·tap] {msg:20s}  shape={x.shape}  dtype={x.dtype}  μ={float(jnp.mean(x)):.4f}")
             return x
         return self._chain(_t, f"tap")
 
@@ -306,23 +306,23 @@ class JX:
 
     def __repr__(self) -> str:
         tag = "✓" if self.data is not None else "∅"
-        return f"JX{tag}[ {self.name} ]"
+        return f"YakTensor{tag}[ {self.name} ]"
 
 
 # ─────────────────────────────────────────────────────────────
 # Factory
 # ─────────────────────────────────────────────────────────────
 
-def jx(data=None, name: str = "root") -> JX:
+def yakyax(data=None, name: str = "root") -> YakTensor:
     """
     Entry point — the $ of JAX.
 
-    jx(array)   — rooted pipeline, .value() works immediately
-    jx()        — reusable pipeline, call it like a function
+    yakyax(array)   — rooted pipeline, .value() works immediately
+    yakyax()        — reusable pipeline, call it like a function
     """
-    return JX(data, name=name)
+    return YakTensor(data, name=name)
 
-jq = jx   # jQuery alias  ($ is not valid Python syntax at module level — use jq or import as $)
+yk = yakyax   # YAKYAX alias
 
 
 # ─────────────────────────────────────────────────────────────
@@ -332,7 +332,7 @@ jq = jx   # jQuery alias  ($ is not valid Python syntax at module level — use 
 class Linear:
     """
     Dense layer.  Parameters are plain JAX arrays — no pytree magic,
-    intentionally simple so they compose cleanly with JX pipelines.
+    intentionally simple so they compose cleanly with YakTensor pipelines.
     """
 
     def __init__(
@@ -347,25 +347,25 @@ class Linear:
         self.W = jax.random.normal(key, (in_features, out_features)) * scale
         self.b = jnp.zeros(out_features) if use_bias else None
 
-    def __call__(self, x: JX) -> JX:
-        """Returns a new JX with matmul + bias appended to the chain."""
+    def __call__(self, x: YakTensor) -> YakTensor:
+        """Returns a new YakTensor with matmul + bias appended to the chain."""
         result = x @ self.W
         return result + self.b if self.b is not None else result
 
     def parameters(self):
-        p = [jx(self.W, name="W")]
+        p = [yakyax(self.W, name="W")]
         if self.b is not None:
-            p.append(jx(self.b, name="b"))
+            p.append(yakyax(self.b, name="b"))
         return p
 
 
 class Sequential:
-    """Stack of callable layers, each receiving and returning a JX."""
+    """Stack of callable layers, each receiving and returning a YakTensor."""
 
     def __init__(self, *layers):
         self.layers = layers
 
-    def __call__(self, x: JX) -> JX:
+    def __call__(self, x: YakTensor) -> YakTensor:
         for layer in self.layers:
             x = layer(x)
         return x
@@ -386,9 +386,9 @@ class Optimizer:
     Operates on a flat JAX array of parameters for simplicity.
     """
 
-    def __init__(self, params: JX, tx: optax.GradientTransformation):
+    def __init__(self, params: YakTensor, tx: optax.GradientTransformation):
         if params.data is None:
-            raise ValueError("Optimizer needs a JX with data attached.")
+            raise ValueError("Optimizer needs a YakTensor with data attached.")
         self.params    = params
         self.tx        = tx
         self.opt_state = tx.init(params.data)
@@ -400,7 +400,7 @@ class Optimizer:
         new_p = optax.apply_updates(self.params.data, updates)
 
         new_opt            = Optimizer.__new__(Optimizer)
-        new_opt.params     = JX(new_p, name="params")
+        new_opt.params     = YakTensor(new_p, name="params")
         new_opt.tx         = self.tx
         new_opt.opt_state  = new_state
         return float(val), new_opt
@@ -423,22 +423,22 @@ class Optimizer:
         return losses
 
 
-def sgd(params: JX, lr: float = 0.01)   -> Optimizer: return Optimizer(params, optax.sgd(lr))
-def adam(params: JX, lr: float = 0.001) -> Optimizer: return Optimizer(params, optax.adam(lr))
-def adamw(params: JX, lr: float = 0.001)-> Optimizer: return Optimizer(params, optax.adamw(lr))
+def sgd(params: YakTensor, lr: float = 0.01)   -> Optimizer: return Optimizer(params, optax.sgd(lr))
+def adam(params: YakTensor, lr: float = 0.001) -> Optimizer: return Optimizer(params, optax.adam(lr))
+def adamw(params: YakTensor, lr: float = 0.001)-> Optimizer: return Optimizer(params, optax.adamw(lr))
 
 
 # ─────────────────────────────────────────────────────────────
 # Loss functions
 # ─────────────────────────────────────────────────────────────
 
-def mse(pred: JX, target: JX)  -> JX: return ((pred - target) ** 2).mean()
-def mae(pred: JX, target: JX)  -> JX: return (pred - target).abs().mean()
+def mse(pred: YakTensor, target: YakTensor)  -> YakTensor: return ((pred - target) ** 2).mean()
+def mae(pred: YakTensor, target: YakTensor)  -> YakTensor: return (pred - target).abs().mean()
 
-def cross_entropy(logits: JX, labels: JX) -> JX:
+def cross_entropy(logits: YakTensor, labels: YakTensor) -> YakTensor:
     return -(labels * logits.log_softmax()).sum()
 
-def binary_cross_entropy(logits: JX, labels: JX) -> JX:
+def binary_cross_entropy(logits: YakTensor, labels: YakTensor) -> YakTensor:
     return -(
         labels * logits.log_sigmoid()
         + (1 - labels) * (-logits).log_sigmoid()
@@ -466,32 +466,32 @@ def demo():
 
     # ── 0. Basics ────────────────────────────────────────────
     print(sep)
-    print("JX  tight build")
+    print("YakTensor  tight build")
     print(sep)
 
     x = jnp.array([1.0, -2.0, 3.0, -4.0, 5.0])
 
-    pipeline = jq(x).normalize().relu().softmax()
+    pipeline = yakyax(x).normalize().relu().softmax()
     print("\n[pipeline]", pipeline)
     print("value()  :", pipeline.value())
 
-    # JX as a callable (no .data needed)
-    reusable =  jq(None).normalize().relu().softmax()
+    # YakTensor as a callable (no .data needed)
+    reusable =  yakyax(None).normalize().relu().softmax()
     print("\n[reusable pipeline applied to x]")
     print("         :", reusable(x))
 
     # ── 1. Branching (residual-style) ─────────────────────────
     print(f"\n{sep}")
     print("Branching  —  a + b  shares the same x")
-    a =  jq(x).normalize()
-    b =  jq(x).relu()
+    a =  yakyax(x).normalize()
+    b =  yakyax(x).relu()
     c = a + b           # both branches evaluated from the same x
     print("a + b    :", c.value())
 
     # ── 2. .fuse() — JIT ────────────────────────────────────
     print(f"\n{sep}")
     print("Fusion  —  .fuse() compiles the whole chain")
-    deep =  jq(x).normalize().relu().softmax().log().sum()
+    deep =  yakyax(x).normalize().relu().softmax().log().sum()
     fused = deep.fuse()
     print("eager    :", deep.value())
     print("fused    :", fused.value())
@@ -500,7 +500,7 @@ def demo():
     print(f"\n{sep}")
     print("Map  —  .map() vmaps over batch dim 0")
     batch = jnp.stack([x, x * 2, x * 3])
-    result =  jq(batch).map().normalize().relu().sum().value()
+    result =  yakyax(batch).map().normalize().relu().sum().value()
     print("vmap(normalize→relu→sum) per sample:", result)
 
     # ── 4. .scan() ───────────────────────────────────────────
@@ -509,7 +509,7 @@ def demo():
 
     # 4a. Cumulative sum
     xs = jnp.ones(1_000)
-    carry, ys =  jq(xs).scan(lambda c, x: (c + x, c + x), 0.0).value()
+    carry, ys =  yakyax(xs).scan(lambda c, x: (c + x, c + x), 0.0).value()
     print(f"\n  [cumsum]  final carry={carry:.0f}  (expected 1000)")
 
     # 4b. Euler ODE   dy/dt = -y,  y(0)=1  →  y(t)=e^-t
@@ -517,7 +517,7 @@ def demo():
     ts = jnp.arange(1_000) * dt
     def euler_step(y, t):
         return y + dt * (-y), y          # carry=new y, output=old y
-    _, ys_ode =  jq(ts).scan(euler_step, 1.0).value()
+    _, ys_ode =  yakyax(ts).scan(euler_step, 1.0).value()
     print(f"  [ODE]     y(1.0) ≈ {ys_ode[-1]:.5f}  (expected {jnp.exp(-1.0):.5f})")
 
     # 4c. Vanilla RNN
@@ -532,7 +532,7 @@ def demo():
         return h_new, h_new
 
     h0 = jnp.zeros(D_h)
-    h_final, h_seq =  jq(seq).scan(rnn_step, h0).value()
+    h_final, h_seq =  yakyax(seq).scan(rnn_step, h0).value()
     print(f"  [RNN]     h_seq shape={h_seq.shape}  |h_final|={jnp.linalg.norm(h_final):.4f}")
 
     # ── 5. scan timing ───────────────────────────────────────
@@ -548,8 +548,8 @@ def demo():
             c = c + xs[i]
         return c
 
-    scan_pipeline      =  jq(xs_big).scan(lambda c, x: (c + x, c + x), 0.0)
-    scan_fused_pipeline=  jq(xs_big).scan(lambda c, x: (c + x, c + x), 0.0).fuse()
+    scan_pipeline      =  yakyax(xs_big).scan(lambda c, x: (c + x, c + x), 0.0)
+    scan_fused_pipeline=  yakyax(xs_big).scan(lambda c, x: (c + x, c + x), 0.0).fuse()
 
     print()
     _time(python_loop,              xs_big, label="Python loop  (N=10k)")
@@ -560,10 +560,10 @@ def demo():
     print(f"\n{sep}")
     print("Autograd")
 
-    g =  jq(x).normalize().relu().sum().grad().value()
+    g =  yakyax(x).normalize().relu().sum().grad().value()
     print(f"\n  grad  of normalize→relu→sum : {g}")
 
-    val, g2 =  jq(x).normalize().relu().sum().value_and_grad().value()
+    val, g2 =  yakyax(x).normalize().relu().sum().value_and_grad().value()
     print(f"  value                       : {val:.4f}")
     print(f"  grad  (value_and_grad)      : {g2}")
 
@@ -574,7 +574,7 @@ def demo():
     target = jnp.array([3.0, 3.0, 3.0])
     def loss_fn(p): return jnp.mean((p - target) ** 2)
 
-    opt    = adam( jq(jnp.zeros(3)), lr=0.05)
+    opt    = adam( yakyax(jnp.zeros(3)), lr=0.05)
     losses = opt.train(loss_fn, steps=200)
     print(f"  final params : {opt.params.data}")
     print(f"  final loss   : {losses[-1]:.6f}")
@@ -589,7 +589,7 @@ def demo():
         lambda x: x.relu(),
         Linear(16, 1,  key=k2),
     )
-    out = mlp( jq(x)).value()
+    out = mlp( yakyax(x)).value()
     print(f"  MLP(x) = {out}")
 
     print(f"\n{sep}")
