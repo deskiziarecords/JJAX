@@ -1,4 +1,4 @@
-# YAKJAX
+# YAKYAX
 **Chainable, lazy tensor ops for JAX – because fuck boilerplate.**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -6,7 +6,7 @@
 
 
 
-![YAKJAX mascot – geometric yak with JAX branding](https://github.com/deskiziarecords/YAKJAX/blob/main/YAKJAX.jpg)  
+![YAKYAX mascot – geometric yak with JAX branding](https://github.com/deskiziarecords/YAKYAX/blob/main/YAKYAX.jpg)
 > Built because I needed simple chains without the ceremony. Yaks don't do boilerplate.
 *(shaggy, sturdy, no nonsense – just like the API)*
 
@@ -27,9 +27,9 @@ You deserve better. Left-to-right. No nesting. No mandatory closures.
 ## The Fix
 
 ```python
-from yakjax import YakTensor
+from yakyax import YakTensor, yakyax
 
-z = (YakTensor(x)
+z = (yakyax(x)
      .matmul(W)
      .add(b)
      .relu()
@@ -45,12 +45,12 @@ That's it. Read like a sentence. Lazy but solid as a YAK – nothing computes un
 
 ```python
 import jax.numpy as jnp
-from yakjax import YakTensor, Linear
+from yakyax import YakTensor, Linear, yakyax
 
 x = jnp.ones((32, 784))
 
 # Build once, execute however
-pipeline = (YakTensor(x)
+pipeline = (yakyax(x)
     .matmul(jnp.ones((784, 256)))
     .add(jnp.ones(256))
     .relu()
@@ -67,10 +67,10 @@ batched    = pipeline.vmap(0)        # vectorize over batch dim
 Build graph → inspect → execute. Fusion happens automatically when jitted.
 
 ```python
-graph = (YakTensor(x)
+graph = (yakyax(x)
     .reshape(100, 28, 28)
     .transpose(0, 2, 1)
-    .dot(kernel))
+    .dot(jnp.ones((28, 28)))) # use a dummy kernel for example
 
 print(graph.inspect())   # ops: 3, shape: (100,28,28), dtype: float32
 
@@ -80,10 +80,10 @@ result = graph.value_of()  # now it runs
 ## Gradients, No Tears
 
 ```python
-loss = (YakTensor(x)
-    .matmul(W1).relu()
-    .matmul(W2)
-    .mse(target))
+loss = (yakyax(x)
+    .matmul(jnp.ones((784, 256))).relu()
+    .matmul(jnp.ones((256, 10)))
+    .mse(jnp.zeros(10)))
 
 grads = loss.grad([W1, W2])               # just the grads
 val, grads = loss.value_and_grad([W1, W2]) # value + grads
@@ -94,7 +94,7 @@ No `jax.grad(fn)`, no arg threading, when you step over a function and it feels 
 ## Higher-Level 
 
 ```python
-from yakjax import Sequential, Linear, adam
+from yakyax import Sequential, Linear, adam
 
 model = Sequential([
     Linear(784, 256), 'relu',
@@ -102,7 +102,7 @@ model = Sequential([
     Linear(128, 10)
 ])
 
-logits = YakTensor(batch).sequential(model)
+logits = yakyax(batch).sequential(model)
 loss   = logits.cross_entropy(labels)
 
 opt    = adam(1e-3)
@@ -126,7 +126,7 @@ This ain't replacing Flax / Haiku / Equinox. It's just riding a YAk to enjoy the
 ## Install
 
 ```bash
-pip install yakjax
+pip install yakyax
 ```
 
 Requires: Python ≥3.9, JAX ≥0.4.0
